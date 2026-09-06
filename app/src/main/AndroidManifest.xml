@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="Squish"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Squish">
+
+        <!--
+            No LAUNCHER filter on purpose: this app has no icon in the drawer and
+            only exists inside the share sheet. Add a LAUNCHER filter if you'd
+            rather be able to tap it directly.
+
+            No android:configChanges here: a ViewModel now survives rotation and
+            keeps the Transformer running, so there's nothing left to hack around.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="Squish"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+    </application>
+
+</manifest>

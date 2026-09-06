@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Plain platform theme, not Material Components — the UI is Compose/Material3
+        end to end, so this only needs to cover the window before Compose takes over
+        (edge-to-edge means there's effectively no system chrome to theme).
+    -->
+    <style name="Theme.Squish" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/background_light</item>
+    </style>
+</resources>
