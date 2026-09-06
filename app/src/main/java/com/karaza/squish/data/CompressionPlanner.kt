@@ -51,10 +51,21 @@ object CompressionPlanner {
     fun audioBitrateFor(channelCount: Int): Int =
         if (channelCount <= 1) MONO_AUDIO_BPS else STEREO_AUDIO_BPS
 
-    /** Largest rung on the ladder that still clears MIN_BPP at this bitrate. */
-    fun pickHeight(videoBps: Int): Int {
+    /** Landscape 16:9 fallback, used when the source's real aspect ratio isn't known. */
+    private const val DEFAULT_ASPECT_RATIO = 16.0 / 9.0
+
+    /**
+     * Largest rung on the ladder that still clears MIN_BPP at this bitrate.
+     *
+     * [aspectRatio] is width/height in the video's own display orientation — for a
+     * portrait clip that's e.g. 9:16 (≈0.56), not 16:9. Getting this wrong matters:
+     * assuming landscape for a portrait source computes a much larger (wrong) pixel
+     * count, understating the real bits-per-pixel and picking a softer rung than
+     * the bitrate actually supports.
+     */
+    fun pickHeight(videoBps: Int, aspectRatio: Double = DEFAULT_ASPECT_RATIO): Int {
         for (h in LADDER) {
-            val w = h * 16 / 9
+            val w = (h * aspectRatio).toInt()
             if (videoBps.toDouble() / (w * h * ASSUMED_FPS) >= MIN_BPP) return h
         }
         return LADDER.last()
@@ -72,6 +83,7 @@ object CompressionPlanner {
         durationSeconds: Long,
         keepAudio: Boolean,
         channelCount: Int,
+        sourceWidth: Int = 0,
         sourceHeight: Int = 0,
         resolutionChoice: ResolutionChoice = ResolutionChoice.AUTO,
     ): CompressionPlan {
@@ -80,7 +92,12 @@ object CompressionPlanner {
         val overheadBps = (totalBps * OVERHEAD_FRACTION).toInt().coerceAtLeast(MIN_OVERHEAD_BPS)
         val audioBps = if (keepAudio) audioBitrateFor(channelCount) else 0
         val videoBps = (totalBps - audioBps - overheadBps).coerceAtLeast(MIN_VIDEO_BPS)
-        val height = resolveHeight(resolutionChoice, sourceHeight, videoBps)
+        val aspectRatio = if (sourceWidth > 0 && sourceHeight > 0) {
+            sourceWidth.toDouble() / sourceHeight
+        } else {
+            DEFAULT_ASPECT_RATIO
+        }
+        val height = resolveHeight(resolutionChoice, sourceHeight, videoBps, aspectRatio)
         val estimatedBytes = (videoBps.toLong() + audioBps + overheadBps) * safeDuration / 8
         return CompressionPlan(
             keepAudio = keepAudio,
@@ -98,8 +115,8 @@ object CompressionPlanner {
      * pins the output to that height instead — capped to the source's own height so
      * we never upscale a smaller source into a "higher" resolution than it started at.
      */
-    private fun resolveHeight(choice: ResolutionChoice, sourceHeight: Int, videoBps: Int): Int {
-        val override = choice.targetHeight(sourceHeight) ?: return pickHeight(videoBps)
+    private fun resolveHeight(choice: ResolutionChoice, sourceHeight: Int, videoBps: Int, aspectRatio: Double): Int {
+        val override = choice.targetHeight(sourceHeight) ?: return pickHeight(videoBps, aspectRatio)
         return if (sourceHeight > 0) override.coerceAtMost(sourceHeight) else override
     }
 }

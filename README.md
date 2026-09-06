@@ -82,11 +82,13 @@ different key.
    **Original** / **1080p** / **720p** / **480p**), and two cards ("Keep audio" /
    "Mute") each showing the real predicted resolution and estimated output size for
    that choice, computed by the same `CompressionPlanner.plan()` the exporter uses.
-   A target-size chip row (8/16/25/50/100 MB) recomputes both live. Sources already
-   under the ceiling skip straight past this screen.
+   A target-size chip row (8/16/25/50/100 MB, or type any custom MB value) recomputes
+   both live. Sources already under the ceiling skip straight past this screen.
 2. **Progress** — dimmed thumbnail, determinate progress bar (falls back to
    indeterminate if `Transformer.getProgress()` reports `PROGRESS_STATE_UNAVAILABLE`),
-   elapsed time + ETA, and a working Cancel.
+   elapsed time + ETA, and a working Cancel. A foreground service keeps the export
+   running and shows a notification with live progress if you background the app —
+   see below.
 3. **Result** — size before/after with percent saved, final resolution/audio state,
    auto-launches the share sheet, plus **Save to gallery**, **Share again**, and
    **Try again**.
@@ -119,6 +121,25 @@ just reports 720p and you can see that on the card before committing. The trade-
 yours: forcing a higher resolution at the same byte budget means a lower bits-per-pixel
 ratio (softer video), which is exactly the ladder logic Auto exists to avoid — but
 sometimes you'd rather keep the resolution and accept that than get auto-downscaled.
+
+## Surviving backgrounding
+
+`CompressionForegroundService` (`CompressionForegroundService.kt`) holds the process
+at foreground priority for the duration of an export or pass-through copy — without
+it, Android is free to kill the whole app if you switch away or lock the screen
+mid-export, since a bare Activity+ViewModel carries no special priority once
+backgrounded. The `Transformer` itself still lives and runs in `CompressionViewModel`
+exactly as before; the service's only job is to hold foreground status and show a
+notification (title, current resolution, live progress) while that's happening —
+`CompressionViewModel.launchExport()`/`doPassThrough()` start it, and every terminal
+path (`onExportCompleted`, the terminal branch of `onExportFailed`, `cancel()`,
+`onCleared()`) stops it. Tapping the notification reopens the app.
+
+Needs three manifest permissions: `FOREGROUND_SERVICE` and
+`FOREGROUND_SERVICE_MEDIA_PROCESSING` (both install-time, no prompt) and
+`POST_NOTIFICATIONS` (API 33+ runtime permission — requested opportunistically the
+first time an export starts; if denied, the export still runs and survives
+backgrounding exactly the same, you just won't see the progress notification).
 
 ## Save to gallery
 
@@ -174,9 +195,14 @@ videoBps        = totalBps − audioBps − overheadBps
 ```
 
 Then it picks the highest resolution that still clears a bits-per-pixel floor, same as
-before. Muting frees the entire audio budget for video — on a long clip that can push
-the resolution ladder up a full rung, which is exactly what the two decision cards are
-there to show side by side before you commit.
+before — but now against the source's *real* aspect ratio (`CompressionPlanner
+.pickHeight(videoBps, aspectRatio)`), not a hardcoded 16:9. A portrait clip is closer
+to 9:16; assuming landscape there overstates the pixel count, understates bits/pixel,
+and picks a softer rung than the bitrate actually supports. `MediaProbe` now reads
+both width and height (rotation-corrected) to get this right. Muting frees the entire
+audio budget for video — on a long clip that can push the resolution ladder up a full
+rung, which is exactly what the two decision cards are there to show side by side
+before you commit.
 
 The old `AUDIO_RESERVE_BPS = 128_000` pessimistic reserve is gone — it existed only
 because the app had no control over the AAC bitrate. Now that it does, the reserve is

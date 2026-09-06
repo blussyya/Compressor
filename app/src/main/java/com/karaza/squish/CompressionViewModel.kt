@@ -145,10 +145,12 @@ class CompressionViewModel(
         val info = currentSourceInfo ?: return
         val choice = currentResolutionChoice
         val keepAudioPlan = CompressionPlanner.plan(
-            currentTargetBytes, info.durationSeconds, keepAudio = true, info.channelCount, info.height, choice,
+            currentTargetBytes, info.durationSeconds, keepAudio = true, info.channelCount,
+            sourceWidth = info.width, sourceHeight = info.height, resolutionChoice = choice,
         )
         val mutePlan = CompressionPlanner.plan(
-            currentTargetBytes, info.durationSeconds, keepAudio = false, info.channelCount, info.height, choice,
+            currentTargetBytes, info.durationSeconds, keepAudio = false, info.channelCount,
+            sourceWidth = info.width, sourceHeight = info.height, resolutionChoice = choice,
         )
         _uiState.value = UiState.Deciding(
             sourceInfo = info,
@@ -175,7 +177,8 @@ class CompressionViewModel(
         val info = currentSourceInfo ?: return
         val effectiveKeepAudio = keepAudio && info.hasAudio
         val plan = CompressionPlanner.plan(
-            currentTargetBytes, info.durationSeconds, effectiveKeepAudio, info.channelCount, info.height, currentResolutionChoice,
+            currentTargetBytes, info.durationSeconds, effectiveKeepAudio, info.channelCount,
+            sourceWidth = info.width, sourceHeight = info.height, resolutionChoice = currentResolutionChoice,
         )
         launchExport(info, plan, audioAttempt = 0)
     }
@@ -191,7 +194,8 @@ class CompressionViewModel(
         val state = _uiState.value as? UiState.Failed ?: return
         val newPlan = CompressionPlanner.plan(
             currentTargetBytes, state.sourceInfo.durationSeconds, keepAudio = false, channelCount = 0,
-            sourceHeight = state.sourceInfo.height, resolutionChoice = currentResolutionChoice,
+            sourceWidth = state.sourceInfo.width, sourceHeight = state.sourceInfo.height,
+            resolutionChoice = currentResolutionChoice,
         )
         launchExport(state.sourceInfo, newPlan, audioAttempt = 0)
     }
@@ -233,6 +237,7 @@ class CompressionViewModel(
     }
 
     fun cancel() {
+        CompressionForegroundService.stop(appContext)
         progressJob?.cancel()
         transformer?.cancel()
         transformer = null
@@ -242,6 +247,7 @@ class CompressionViewModel(
     }
 
     private fun launchExport(info: SourceInfo, plan: CompressionPlan, audioAttempt: Int) {
+        CompressionForegroundService.start(appContext)
         val out = File(sharedDir(), "squished_${System.currentTimeMillis()}.mp4")
         currentOutputFile = out
         exportStartedAtMs = SystemClock.elapsedRealtime()
@@ -302,6 +308,7 @@ class CompressionViewModel(
     }
 
     private fun onExportCompleted(info: SourceInfo, plan: CompressionPlan, out: File) {
+        CompressionForegroundService.stop(appContext)
         transformer = null
         currentOutputFile = null
         val outUri = FileProvider.getUriForFile(appContext, "${appContext.packageName}.provider", out)
@@ -333,6 +340,7 @@ class CompressionViewModel(
             return
         }
 
+        CompressionForegroundService.stop(appContext)
         _uiState.value = UiState.Failed(
             sourceInfo = info,
             thumbnail = currentThumbnail,
@@ -344,12 +352,13 @@ class CompressionViewModel(
     }
 
     private fun doPassThrough(info: SourceInfo) {
+        CompressionForegroundService.start(appContext)
         _uiState.value = UiState.Compressing(
             sourceInfo = info,
             thumbnail = currentThumbnail,
             plan = CompressionPlanner.plan(
                 currentTargetBytes, info.durationSeconds, keepAudio = info.hasAudio, info.channelCount,
-                sourceHeight = info.height, resolutionChoice = currentResolutionChoice,
+                sourceWidth = info.width, sourceHeight = info.height, resolutionChoice = currentResolutionChoice,
             ),
             progress = -1,
             elapsedMs = 0,
@@ -365,6 +374,7 @@ class CompressionViewModel(
                     out to FileProvider.getUriForFile(appContext, "${appContext.packageName}.provider", out)
                 }.getOrNull()
             }
+            CompressionForegroundService.stop(appContext)
             if (outUri == null) {
                 _uiState.value = UiState.Home
                 return@launch
@@ -388,11 +398,18 @@ class CompressionViewModel(
                 val t = transformer ?: break
                 val state = t.getProgress(holder)
                 val elapsed = SystemClock.elapsedRealtime() - exportStartedAtMs
+                var notificationHeight = 0
+                var notificationProgress = -1
                 _uiState.update { current ->
                     if (current is UiState.Compressing) {
                         val progress = if (state == Transformer.PROGRESS_STATE_AVAILABLE) holder.progress else -1
+                        notificationHeight = current.plan.height
+                        notificationProgress = progress
                         current.copy(progress = progress, elapsedMs = elapsed)
                     } else current
+                }
+                if (notificationHeight > 0) {
+                    CompressionForegroundService.updateProgress(appContext, "${notificationHeight}p", notificationProgress)
                 }
             }
         }
@@ -407,6 +424,7 @@ class CompressionViewModel(
     override fun onCleared() {
         progressJob?.cancel()
         transformer?.cancel()
+        CompressionForegroundService.stop(appContext)
         super.onCleared()
     }
 }

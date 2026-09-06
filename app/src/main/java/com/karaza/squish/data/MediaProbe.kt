@@ -15,11 +15,11 @@ import android.provider.OpenableColumns
  */
 object MediaProbe {
 
-    private data class DurationAndHeight(val durationSeconds: Long, val height: Int)
+    private data class VideoMetadata(val durationSeconds: Long, val width: Int, val height: Int)
 
     fun readSourceInfo(context: Context, uri: Uri): SourceInfo {
         val channelCount = readAudioChannelCount(context, uri)
-        val (durationSeconds, height) = readDurationAndHeight(context, uri)
+        val (durationSeconds, width, height) = readVideoMetadata(context, uri)
         return SourceInfo(
             uri = uri,
             fileName = displayName(context, uri),
@@ -27,6 +27,7 @@ object MediaProbe {
             sizeBytes = sizeOf(context, uri),
             hasAudio = channelCount > 0,
             channelCount = channelCount.coerceAtLeast(1),
+            width = width,
             height = height,
         )
     }
@@ -53,7 +54,7 @@ object MediaProbe {
         }
     }
 
-    private fun readDurationAndHeight(context: Context, uri: Uri): DurationAndHeight {
+    private fun readVideoMetadata(context: Context, uri: Uri): VideoMetadata {
         val r = MediaMetadataRetriever()
         return try {
             r.setDataSource(context, uri)
@@ -64,11 +65,15 @@ object MediaProbe {
             val rawHeight = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             val rotation = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
             // Rotation metadata swaps which raw dimension is "up" for a portrait-held camera.
-            val height = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
+            val (width, height) = if (rotation == 90 || rotation == 270) {
+                rawHeight to rawWidth
+            } else {
+                rawWidth to rawHeight
+            }
 
-            DurationAndHeight(durationSeconds, height)
+            VideoMetadata(durationSeconds, width, height)
         } catch (e: Exception) {
-            DurationAndHeight(0L, 0)
+            VideoMetadata(0L, 0, 0)
         } finally {
             r.release()
         }

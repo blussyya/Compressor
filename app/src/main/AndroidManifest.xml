@@ -9,6 +9,12 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Foreground service so an export survives the app being backgrounded. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+    <!-- Without this (API 33+) the foreground service still runs, it just posts no visible notification. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -39,6 +45,11 @@
                 <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".CompressionForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProcessing" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
