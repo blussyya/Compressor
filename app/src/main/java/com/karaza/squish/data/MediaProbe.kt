@@ -15,15 +15,19 @@ import android.provider.OpenableColumns
  */
 object MediaProbe {
 
+    private data class DurationAndHeight(val durationSeconds: Long, val height: Int)
+
     fun readSourceInfo(context: Context, uri: Uri): SourceInfo {
         val channelCount = readAudioChannelCount(context, uri)
+        val (durationSeconds, height) = readDurationAndHeight(context, uri)
         return SourceInfo(
             uri = uri,
             fileName = displayName(context, uri),
-            durationSeconds = durationSeconds(context, uri),
+            durationSeconds = durationSeconds,
             sizeBytes = sizeOf(context, uri),
             hasAudio = channelCount > 0,
             channelCount = channelCount.coerceAtLeast(1),
+            height = height,
         )
     }
 
@@ -49,14 +53,22 @@ object MediaProbe {
         }
     }
 
-    private fun durationSeconds(context: Context, uri: Uri): Long {
+    private fun readDurationAndHeight(context: Context, uri: Uri): DurationAndHeight {
         val r = MediaMetadataRetriever()
         return try {
             r.setDataSource(context, uri)
-            (r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val durationSeconds = (r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull() ?: 0L) / 1000
+
+            val rawWidth = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val rawHeight = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rotation = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            // Rotation metadata swaps which raw dimension is "up" for a portrait-held camera.
+            val height = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
+
+            DurationAndHeight(durationSeconds, height)
         } catch (e: Exception) {
-            0L
+            DurationAndHeight(0L, 0)
         } finally {
             r.release()
         }

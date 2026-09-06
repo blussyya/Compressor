@@ -27,6 +27,8 @@ import androidx.media3.transformer.VideoEncoderSettings
 import com.karaza.squish.data.CompressionPlan
 import com.karaza.squish.data.CompressionPlanner
 import com.karaza.squish.data.MediaProbe
+import com.karaza.squish.data.MediaStoreSaver
+import com.karaza.squish.data.ResolutionChoice
 import com.karaza.squish.data.SourceInfo
 import com.karaza.squish.data.UiState
 import kotlinx.coroutines.Dispatchers
@@ -50,11 +52,12 @@ class CompressionViewModel(
     private companion object {
         const val KEY_SOURCE_URI = "source_uri"
         const val KEY_TARGET_BYTES = "target_bytes"
+        const val KEY_RESOLUTION_CHOICE = "resolution_choice"
     }
 
     private val appContext get() = getApplication<Application>()
 
-    private val _uiState = MutableStateFlow<UiState>(UiState.NoInput)
+    private val _uiState = MutableStateFlow<UiState>(UiState.Home)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     private var sourceUri: Uri?
@@ -64,6 +67,12 @@ class CompressionViewModel(
     private var currentTargetBytes: Long
         get() = savedStateHandle.get<Long>(KEY_TARGET_BYTES) ?: CompressionPlanner.DEFAULT_TARGET_BYTES
         set(value) { savedStateHandle[KEY_TARGET_BYTES] = value }
+
+    private var currentResolutionChoice: ResolutionChoice
+        get() = savedStateHandle.get<String>(KEY_RESOLUTION_CHOICE)
+            ?.let { runCatching { ResolutionChoice.valueOf(it) }.getOrNull() }
+            ?: ResolutionChoice.AUTO
+        set(value) { savedStateHandle[KEY_RESOLUTION_CHOICE] = value.name }
 
     private var currentSourceInfo: SourceInfo? = null
     private var currentThumbnail: android.graphics.Bitmap? = null
@@ -86,22 +95,35 @@ class CompressionViewModel(
         purgeSharedCache()
         val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
         if (intent.action != Intent.ACTION_SEND || uri == null) {
-            _uiState.value = UiState.NoInput
+            _uiState.value = UiState.Home
             return
         }
         sourceUri = uri
         loadSource()
     }
 
+    /** The other way in: tapping "Pick a video" on the home screen (launcher entry point). */
+    fun onVideoPicked(uri: Uri) {
+        purgeSharedCache()
+        try {
+            appContext.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: SecurityException) {
+            // Not all providers grant persistable access; the URI still works for this
+            // session, it just won't survive process death. loadSource() below still runs.
+        }
+        sourceUri = uri
+        loadSource()
+    }
+
     private fun loadSource() {
-        val uri = sourceUri ?: run { _uiState.value = UiState.NoInput; return }
+        val uri = sourceUri ?: run { _uiState.value = UiState.Home; return }
         _uiState.value = UiState.Loading
         viewModelScope.launch {
             val info = withContext(Dispatchers.IO) {
                 runCatching { MediaProbe.readSourceInfo(appContext, uri) }.getOrNull()
             }
             if (info == null || info.durationSeconds <= 0 || info.sizeBytes <= 0) {
-                _uiState.value = UiState.NoInput
+                _uiState.value = UiState.Home
                 return@launch
             }
             currentSourceInfo = info
@@ -121,12 +143,18 @@ class CompressionViewModel(
 
     private fun updateDecidingState() {
         val info = currentSourceInfo ?: return
-        val keepAudioPlan = CompressionPlanner.plan(currentTargetBytes, info.durationSeconds, keepAudio = true, info.channelCount)
-        val mutePlan = CompressionPlanner.plan(currentTargetBytes, info.durationSeconds, keepAudio = false, info.channelCount)
+        val choice = currentResolutionChoice
+        val keepAudioPlan = CompressionPlanner.plan(
+            currentTargetBytes, info.durationSeconds, keepAudio = true, info.channelCount, info.height, choice,
+        )
+        val mutePlan = CompressionPlanner.plan(
+            currentTargetBytes, info.durationSeconds, keepAudio = false, info.channelCount, info.height, choice,
+        )
         _uiState.value = UiState.Deciding(
             sourceInfo = info,
             thumbnail = currentThumbnail,
             targetBytes = currentTargetBytes,
+            resolutionChoice = choice,
             keepAudioPlan = keepAudioPlan,
             mutePlan = mutePlan,
         )
@@ -137,11 +165,18 @@ class CompressionViewModel(
         if (_uiState.value is UiState.Deciding) updateDecidingState()
     }
 
+    fun setResolutionChoice(choice: ResolutionChoice) {
+        currentResolutionChoice = choice
+        if (_uiState.value is UiState.Deciding) updateDecidingState()
+    }
+
     /** User's choice from the decision screen. Ignored if the source has no audio track. */
     fun startCompression(keepAudio: Boolean) {
         val info = currentSourceInfo ?: return
         val effectiveKeepAudio = keepAudio && info.hasAudio
-        val plan = CompressionPlanner.plan(currentTargetBytes, info.durationSeconds, effectiveKeepAudio, info.channelCount)
+        val plan = CompressionPlanner.plan(
+            currentTargetBytes, info.durationSeconds, effectiveKeepAudio, info.channelCount, info.height, currentResolutionChoice,
+        )
         launchExport(info, plan, audioAttempt = 0)
     }
 
@@ -154,7 +189,10 @@ class CompressionViewModel(
 
     fun muteAndRetry() {
         val state = _uiState.value as? UiState.Failed ?: return
-        val newPlan = CompressionPlanner.plan(currentTargetBytes, state.sourceInfo.durationSeconds, keepAudio = false, channelCount = 0)
+        val newPlan = CompressionPlanner.plan(
+            currentTargetBytes, state.sourceInfo.durationSeconds, keepAudio = false, channelCount = 0,
+            sourceHeight = state.sourceInfo.height, resolutionChoice = currentResolutionChoice,
+        )
         launchExport(state.sourceInfo, newPlan, audioAttempt = 0)
     }
 
@@ -172,13 +210,35 @@ class CompressionViewModel(
         _uiState.update { s -> if (s is UiState.Done) s.copy(autoShared = true) else s }
     }
 
+    /**
+     * Copies the output into the device's Movies collection. On API 23-28 the caller
+     * must have already obtained WRITE_EXTERNAL_STORAGE before calling this — there's
+     * no Activity here to request it from.
+     */
+    fun saveToGallery() {
+        val state = _uiState.value as? UiState.Done ?: return
+        _uiState.update { s -> if (s is UiState.Done) s.copy(savingToGallery = true, galleryError = null) else s }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { MediaStoreSaver.save(appContext, state.outputUri) }
+            }
+            _uiState.update { s ->
+                if (s !is UiState.Done) return@update s
+                result.fold(
+                    onSuccess = { s.copy(savingToGallery = false, savedToGallery = true) },
+                    onFailure = { e -> s.copy(savingToGallery = false, galleryError = e.message ?: "Couldn't save") },
+                )
+            }
+        }
+    }
+
     fun cancel() {
         progressJob?.cancel()
         transformer?.cancel()
         transformer = null
         currentOutputFile?.delete()
         currentOutputFile = null
-        if (currentSourceInfo != null) updateDecidingState() else _uiState.value = UiState.NoInput
+        if (currentSourceInfo != null) updateDecidingState() else _uiState.value = UiState.Home
     }
 
     private fun launchExport(info: SourceInfo, plan: CompressionPlan, audioAttempt: Int) {
@@ -287,7 +347,10 @@ class CompressionViewModel(
         _uiState.value = UiState.Compressing(
             sourceInfo = info,
             thumbnail = currentThumbnail,
-            plan = CompressionPlanner.plan(currentTargetBytes, info.durationSeconds, keepAudio = info.hasAudio, info.channelCount),
+            plan = CompressionPlanner.plan(
+                currentTargetBytes, info.durationSeconds, keepAudio = info.hasAudio, info.channelCount,
+                sourceHeight = info.height, resolutionChoice = currentResolutionChoice,
+            ),
             progress = -1,
             elapsedMs = 0,
             isPassThrough = true,
@@ -303,7 +366,7 @@ class CompressionViewModel(
                 }.getOrNull()
             }
             if (outUri == null) {
-                _uiState.value = UiState.NoInput
+                _uiState.value = UiState.Home
                 return@launch
             }
             val (out, uri) = outUri

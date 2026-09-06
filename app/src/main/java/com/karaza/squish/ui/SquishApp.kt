@@ -7,9 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -22,6 +20,7 @@ import com.karaza.squish.CompressionViewModel
 import com.karaza.squish.data.UiState
 import com.karaza.squish.ui.screens.DecisionScreen
 import com.karaza.squish.ui.screens.ErrorScreen
+import com.karaza.squish.ui.screens.HomeScreen
 import com.karaza.squish.ui.screens.ProgressScreen
 import com.karaza.squish.ui.screens.ResultScreen
 
@@ -50,11 +49,12 @@ fun SquishApp(viewModel: CompressionViewModel) {
     Scaffold { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (val s = state) {
-                is UiState.NoInput -> CenteredMessage("Share a video to this app.")
-                is UiState.Loading -> CenteredMessage(null)
+                is UiState.Home -> HomeScreen(onVideoPicked = viewModel::onVideoPicked)
+                is UiState.Loading -> LoadingSpinner()
                 is UiState.Deciding -> DecisionScreen(
                     state = s,
                     onTargetBytesChange = viewModel::setTargetBytes,
+                    onResolutionChange = viewModel::setResolutionChoice,
                     onChoose = viewModel::startCompression,
                 )
                 is UiState.Compressing -> ProgressScreen(
@@ -65,6 +65,7 @@ fun SquishApp(viewModel: CompressionViewModel) {
                     state = s,
                     onShareAgain = { launchShareSheet(context, s.outputUri) },
                     onTryAgain = viewModel::tryAgain,
+                    onSaveToGallery = viewModel::saveToGallery,
                 )
                 is UiState.Failed -> ErrorScreen(
                     state = s,
@@ -78,17 +79,13 @@ fun SquishApp(viewModel: CompressionViewModel) {
 }
 
 @Composable
-private fun CenteredMessage(text: String?) {
+private fun LoadingSpinner() {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
     ) {
-        if (text != null) {
-            Text(text, style = MaterialTheme.typography.bodyLarge)
-        } else {
-            CircularProgressIndicator()
-        }
+        CircularProgressIndicator()
     }
 }
 

@@ -5,8 +5,11 @@ import android.net.Uri
 
 sealed interface UiState {
 
-    /** No share intent yet, or the restored source URI can no longer be read. */
-    data object NoInput : UiState
+    /**
+     * Nothing loaded yet: freshly launched from the launcher icon (pick a video),
+     * or the restored source URI from a previous session can no longer be read.
+     */
+    data object Home : UiState
 
     /** Reading source metadata / extracting the thumbnail. */
     data object Loading : UiState
@@ -15,6 +18,7 @@ sealed interface UiState {
         val sourceInfo: SourceInfo,
         val thumbnail: Bitmap?,
         val targetBytes: Long,
+        val resolutionChoice: ResolutionChoice,
         val keepAudioPlan: CompressionPlan,
         val mutePlan: CompressionPlan,
     ) : UiState
@@ -35,6 +39,9 @@ sealed interface UiState {
         val plan: CompressionPlan?,
         val outputUri: Uri,
         val autoShared: Boolean = false,
+        val savingToGallery: Boolean = false,
+        val savedToGallery: Boolean = false,
+        val galleryError: String? = null,
     ) : UiState
 
     data class Failed(

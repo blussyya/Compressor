@@ -1,16 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        Only needed on API 23-28 to save the compressed video into the public
+        Movies collection; API 29+ (scoped storage) writes to MediaStore without it.
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Squish"
         android:supportsRtl="true"
         android:theme="@style/Theme.Squish">
 
         <!--
-            No LAUNCHER filter on purpose: this app has no icon in the drawer and
-            only exists inside the share sheet. Add a LAUNCHER filter if you'd
-            rather be able to tap it directly.
+            Two ways in: tap the launcher icon (MAIN/LAUNCHER, shows the picker-driven
+            home screen) or share a video to it from another app (SEND). Both funnel
+            into the same decision/progress/result flow.
 
             No android:configChanges here: a ViewModel now survives rotation and
             keeps the Transformer running, so there's nothing left to hack around.
@@ -18,8 +28,11 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="Squish"
-            android:excludeFromRecents="true">
+            android:label="Squish">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

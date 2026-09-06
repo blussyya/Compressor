@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.karaza.squish.data.CompressionPlan
 import com.karaza.squish.data.CompressionPlanner
+import com.karaza.squish.data.ResolutionChoice
 import com.karaza.squish.data.UiState
 import com.karaza.squish.ui.formatDuration
 import com.karaza.squish.ui.formatKbps
@@ -40,6 +41,7 @@ import com.karaza.squish.ui.formatMb
 fun DecisionScreen(
     state: UiState.Deciding,
     onTargetBytesChange: (Long) -> Unit,
+    onResolutionChange: (ResolutionChoice) -> Unit,
     onChoose: (keepAudio: Boolean) -> Unit,
 ) {
     Column(
@@ -73,6 +75,23 @@ fun DecisionScreen(
                     selected = state.targetBytes == bytes,
                     onClick = { onTargetBytesChange(bytes) },
                     label = { Text("$mb MB") },
+                )
+            }
+        }
+
+        Spacer(16.dp)
+
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(ResolutionChoice.entries) { choice ->
+                val label = if (choice == ResolutionChoice.ORIGINAL && state.sourceInfo.height > 0) {
+                    "Original (${state.sourceInfo.height}p)"
+                } else {
+                    choice.label
+                }
+                FilterChip(
+                    selected = state.resolutionChoice == choice,
+                    onClick = { onResolutionChange(choice) },
+                    label = { Text(label) },
                 )
             }
         }

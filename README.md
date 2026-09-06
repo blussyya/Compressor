@@ -1,7 +1,7 @@
 # Squish
 
-Share a video to it → comes back under a size ceiling → share sheet reopens so you can
-fire it at Discord/Signal/WhatsApp.
+Share a video to it (or open it and pick one yourself) → comes back under a size
+ceiling → share sheet reopens so you can fire it at Discord/Signal/WhatsApp.
 
 Hardware encode via Media3 Transformer. No FFmpeg, no native binaries.
 
@@ -9,8 +9,8 @@ Hardware encode via Media3 Transformer. No FFmpeg, no native binaries.
 
 1. Android Studio → Open → point at this folder (it's a normal Gradle project, no
    need to create a new one).
-2. Sync, run. The app has no launcher icon — it only shows up when you hit
-   Share on a video.
+2. Sync, run. The app has a launcher icon now, or share a video to it from your
+   gallery/files app — either way lands on the same decision screen.
 
 ## Getting a build without Android Studio
 
@@ -27,7 +27,12 @@ device. Add a release signing config if you ever want a proper signed release bu
 
 ## Screens
 
-1. **Decision** — thumbnail, filename, duration/size, and two cards ("Keep audio" /
+0. **Home** — shown when you tap the app icon directly instead of sharing into it.
+   Just a **Pick a video** button (`ActivityResultContracts.OpenDocument`, `video/*`)
+   that feeds into the same flow below. Also the fallback screen if a restored source
+   URI from a previous session can no longer be read.
+1. **Decision** — thumbnail, filename, duration/size, a resolution row (**Auto** /
+   **Original** / **1080p** / **720p** / **480p**), and two cards ("Keep audio" /
    "Mute") each showing the real predicted resolution and estimated output size for
    that choice, computed by the same `CompressionPlanner.plan()` the exporter uses.
    A target-size chip row (8/16/25/50/100 MB) recomputes both live. Sources already
@@ -36,7 +41,8 @@ device. Add a release signing config if you ever want a proper signed release bu
    indeterminate if `Transformer.getProgress()` reports `PROGRESS_STATE_UNAVAILABLE`),
    elapsed time + ETA, and a working Cancel.
 3. **Result** — size before/after with percent saved, final resolution/audio state,
-   auto-launches the share sheet, plus **Share again** and **Try again**.
+   auto-launches the share sheet, plus **Save to gallery**, **Share again**, and
+   **Try again**.
 4. **Error** — the `ExportException` code/message, **Retry at lower quality** (drops
    one rung on the resolution ladder), **Share original** as an escape hatch, and
    **Mute and retry** when the failure happened on an audio-encoding attempt.
@@ -44,10 +50,48 @@ device. Add a release signing config if you ever want a proper signed release bu
 All of this lives in Jetpack Compose + Material 3 (dynamic color on Android 12+, dark
 theme follows the system, edge-to-edge). `MainActivity` is now just a host: all state
 and the `Transformer` lifecycle live in `CompressionViewModel`, driven by a
-`StateFlow<UiState>` sealed interface (`NoInput`, `Loading`, `Deciding`, `Compressing`,
+`StateFlow<UiState>` sealed interface (`Home`, `Loading`, `Deciding`, `Compressing`,
 `Done`, `Failed`). Rotating mid-export no longer restarts anything —
 `android:configChanges` is gone from the manifest because there's nothing left for it
 to work around.
+
+## Manual resolution override
+
+`ResolutionChoice` (`data/ResolutionChoice.kt`) sits next to the audio choice on the
+decision screen:
+
+| Choice | What it pins the output height to |
+|---|---|
+| **Auto** | Original behavior — highest ladder rung that clears `MIN_BPP` at the computed bitrate. |
+| **Original** | The source's own height (portrait-corrected), i.e. don't downscale at all. |
+| **1080p / 720p / 480p** | That height exactly. |
+
+Every non-Auto choice is capped to the source's own height in `CompressionPlanner
+.resolveHeight()` so picking "1080p" on a 720p source doesn't upscale it — the plan
+just reports 720p and you can see that on the card before committing. The trade-off is
+yours: forcing a higher resolution at the same byte budget means a lower bits-per-pixel
+ratio (softer video), which is exactly the ladder logic Auto exists to avoid — but
+sometimes you'd rather keep the resolution and accept that than get auto-downscaled.
+
+## Save to gallery
+
+The result screen's **Save to gallery** button copies the output into the device's
+`Movies/Squish` collection via `MediaStoreSaver` (`data/MediaStoreSaver.kt`):
+
+- **Android 10+ (API 29+)**: inserts through `MediaStore` with `RELATIVE_PATH` and
+  `IS_PENDING`, scoped-storage style — no permission needed.
+- **Android 6-9 (API 23-28)**: writes directly to the public Movies directory, then
+  `MediaScannerConnection.scanFile()` so it shows up in the gallery. This path needs
+  `WRITE_EXTERNAL_STORAGE` (declared with `maxSdkVersion="28"` in the manifest, so it's
+  a no-op grant on newer OSes); the button requests it at runtime on those API levels
+  before calling into the ViewModel.
+
+## Launcher icon
+
+`app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml` is an adaptive icon (background +
+foreground layers); legacy raster fallbacks live in `mipmap-{m,h,xh,xxh,xxxh}dpi/` for
+API < 26. Regenerate them from `gen_icon.py`-style Pillow output if you want a
+different look — there's no vector source of truth checked in, just the rasters.
 
 ## The audio decision
 

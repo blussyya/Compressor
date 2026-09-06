@@ -10,4 +10,6 @@ data class SourceInfo(
     val sizeBytes: Long,
     val hasAudio: Boolean,
     val channelCount: Int,
+    /** Display height in pixels, already corrected for rotation (portrait vs landscape). */
+    val height: Int,
 )

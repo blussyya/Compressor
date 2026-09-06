@@ -72,13 +72,15 @@ object CompressionPlanner {
         durationSeconds: Long,
         keepAudio: Boolean,
         channelCount: Int,
+        sourceHeight: Int = 0,
+        resolutionChoice: ResolutionChoice = ResolutionChoice.AUTO,
     ): CompressionPlan {
         val safeDuration = durationSeconds.coerceAtLeast(1)
         val totalBps = (targetBytes * 8 / safeDuration).toInt()
         val overheadBps = (totalBps * OVERHEAD_FRACTION).toInt().coerceAtLeast(MIN_OVERHEAD_BPS)
         val audioBps = if (keepAudio) audioBitrateFor(channelCount) else 0
         val videoBps = (totalBps - audioBps - overheadBps).coerceAtLeast(MIN_VIDEO_BPS)
-        val height = pickHeight(videoBps)
+        val height = resolveHeight(resolutionChoice, sourceHeight, videoBps)
         val estimatedBytes = (videoBps.toLong() + audioBps + overheadBps) * safeDuration / 8
         return CompressionPlan(
             keepAudio = keepAudio,
@@ -89,5 +91,15 @@ object CompressionPlanner {
             estimatedBytes = estimatedBytes,
             targetBytes = targetBytes,
         )
+    }
+
+    /**
+     * AUTO defers to the bitrate-driven ladder pick, same as always. A manual choice
+     * pins the output to that height instead — capped to the source's own height so
+     * we never upscale a smaller source into a "higher" resolution than it started at.
+     */
+    private fun resolveHeight(choice: ResolutionChoice, sourceHeight: Int, videoBps: Int): Int {
+        val override = choice.targetHeight(sourceHeight) ?: return pickHeight(videoBps)
+        return if (sourceHeight > 0) override.coerceAtMost(sourceHeight) else override
     }
 }
