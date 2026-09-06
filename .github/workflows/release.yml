@@ -32,8 +32,32 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      # Decodes the SQUISH_KEYSTORE_BASE64 secret (if set) into a file and points
+      # app/build.gradle.kts's signing config at it. No secret configured yet →
+      # SQUISH_KEYSTORE_PATH stays empty and the build below falls back to an
+      # unsigned/debug build, so this workflow keeps working before you set them up.
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SQUISH_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/squish-release.jks"
+            echo "SQUISH_KEYSTORE_PATH=$RUNNER_TEMP/squish-release.jks" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build APK
+        env:
+          SQUISH_KEYSTORE_PASSWORD: ${{ secrets.SQUISH_KEYSTORE_PASSWORD }}
+          SQUISH_KEY_ALIAS: ${{ secrets.SQUISH_KEY_ALIAS }}
+          SQUISH_KEY_PASSWORD: ${{ secrets.SQUISH_KEY_PASSWORD }}
+        run: |
+          if [ -n "$SQUISH_KEYSTORE_PATH" ]; then
+            ./gradlew assembleRelease --no-daemon
+            echo "APK_SRC=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
+          else
+            ./gradlew assembleDebug --no-daemon
+            echo "APK_SRC=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+          fi
 
       - name: Determine release tag
         id: tag
@@ -48,7 +72,7 @@ jobs:
         run: |
           mkdir -p dist
           name="squish-${{ steps.tag.outputs.tag }}.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/$name"
+          cp "$APK_SRC" "dist/$name"
           echo "APK_PATH=dist/$name" >> "$GITHUB_ENV"
 
       # Always publish a Release with the APK attached — on a real version tag

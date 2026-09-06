@@ -16,9 +16,27 @@ android {
         versionName = "1.0"
     }
 
+    // Release signing comes entirely from environment variables — never hardcoded
+    // and never committed. Locally that means exporting them yourself before running
+    // assembleRelease; in CI, release.yml populates them from repo secrets. If they're
+    // not set (a fresh clone with no keystore around), the release build type just
+    // comes out unsigned instead of failing the build.
+    val keystorePath = System.getenv("SQUISH_KEYSTORE_PATH")
+    signingConfigs {
+        if (keystorePath != null && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("SQUISH_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("SQUISH_KEY_ALIAS")
+                keyPassword = System.getenv("SQUISH_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 

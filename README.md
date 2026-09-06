@@ -14,16 +14,63 @@ Hardware encode via Media3 Transformer. No FFmpeg, no native binaries.
 
 ## Getting a build without Android Studio
 
-`.github/workflows/release.yml` builds a debug APK in CI:
+`.github/workflows/release.yml` builds an APK in CI and always publishes it as a
+GitHub Release:
 
-- **Push a tag** like `v1.0.0` → it builds the APK and publishes it as a GitHub
-  Release with the APK attached.
+- **Push a tag** like `v1.0.0` → release under that tag.
 - **Or run it manually** from the Actions tab (Actions → Build & Release APK →
-  Run workflow) any time you just want a build to test — no tag needed. It shows up
-  as a downloadable artifact on that workflow run instead of a Release.
+  Run workflow) any time you want a fresh build without tagging — it publishes as
+  `build-<run number>`, marked prerelease so it doesn't look like a real version.
 
-It's a debug build (debug-signed, unoptimized) — fine for sideloading onto your own
-device. Add a release signing config if you ever want a proper signed release build.
+Without signing secrets configured (see below) it falls back to a debug build
+(debug-signed, unoptimized) — fine for sideloading onto your own device, but every
+debug build is signed with a throwaway key, so installing a newer one over an older
+one can fail with a signature mismatch depending on your device. Signing fixes that.
+
+## Signing release builds
+
+`app/build.gradle.kts` reads the release signing config entirely from environment
+variables — nothing is hardcoded or committed:
+
+| Env var | What it is |
+|---|---|
+| `SQUISH_KEYSTORE_PATH` | Local filesystem path to the `.jks` keystore file |
+| `SQUISH_KEYSTORE_PASSWORD` | Keystore password |
+| `SQUISH_KEY_ALIAS` | Key alias inside the keystore (`squish` if you used the setup below) |
+| `SQUISH_KEY_PASSWORD` | Key password (same as the keystore password for a PKCS12 keystore, which is what `keytool` makes by default now) |
+
+If they're not set, `assembleRelease` still works — it just produces an **unsigned**
+APK (`app-release-unsigned.apk`), which won't install on a device as-is.
+
+**Building a signed release locally:**
+```
+export SQUISH_KEYSTORE_PATH=/path/to/squish-release.jks
+export SQUISH_KEYSTORE_PASSWORD=...
+export SQUISH_KEY_ALIAS=squish
+export SQUISH_KEY_PASSWORD=...
+./gradlew assembleRelease
+```
+
+**Building a signed release in CI:** add these four **repository secrets**
+(Settings → Secrets and variables → Actions → New repository secret) — the workflow
+picks them up automatically once they exist, no other change needed:
+
+| Secret name | Value |
+|---|---|
+| `SQUISH_KEYSTORE_BASE64` | The keystore file, base64-encoded (`base64 -w0 squish-release.jks`) |
+| `SQUISH_KEYSTORE_PASSWORD` | Keystore password |
+| `SQUISH_KEY_ALIAS` | `squish` |
+| `SQUISH_KEY_PASSWORD` | Key password |
+
+**Generating a keystore**, if you don't have one:
+```
+keytool -genkeypair -v -keystore squish-release.jks -alias squish \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+Keep this file and its passwords somewhere permanent and backed up — it's the
+identity of the app. Losing it means every future release has to switch to a new
+key, and anyone with an old build can't seamlessly update to a new one signed by a
+different key.
 
 ## Screens
 
