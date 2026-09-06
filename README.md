@@ -12,6 +12,19 @@ Hardware encode via Media3 Transformer. No FFmpeg, no native binaries.
 2. Sync, run. The app has no launcher icon — it only shows up when you hit
    Share on a video.
 
+## Getting a build without Android Studio
+
+`.github/workflows/release.yml` builds a debug APK in CI:
+
+- **Push a tag** like `v1.0.0` → it builds the APK and publishes it as a GitHub
+  Release with the APK attached.
+- **Or run it manually** from the Actions tab (Actions → Build & Release APK →
+  Run workflow) any time you just want a build to test — no tag needed. It shows up
+  as a downloadable artifact on that workflow run instead of a Release.
+
+It's a debug build (debug-signed, unoptimized) — fine for sideloading onto your own
+device. Add a release signing config if you ever want a proper signed release build.
+
 ## Screens
 
 1. **Decision** — thumbnail, filename, duration/size, and two cards ("Keep audio" /

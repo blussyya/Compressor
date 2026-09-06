@@ -1,0 +1,58 @@
+name: Build & Release APK
+
+on:
+  # Push a tag like v1.0.0 to build the APK and publish it as a GitHub Release.
+  push:
+    tags:
+      - "v*"
+  # Or trigger manually from the Actions tab any time you just want a build
+  # to test, without cutting a release.
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Stage APK
+        run: |
+          mkdir -p dist
+          name="squish-${GITHUB_REF_NAME:-manual-$GITHUB_RUN_NUMBER}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/$name"
+          echo "APK_PATH=dist/$name" >> "$GITHUB_ENV"
+
+      # Tag push: publish a GitHub Release with the APK attached.
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.APK_PATH }}
+          generate_release_notes: true
+
+      # Manual run: just attach the APK to the workflow run, no release cut.
+      - name: Upload build artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: squish-debug-apk
+          path: ${{ env.APK_PATH }}
