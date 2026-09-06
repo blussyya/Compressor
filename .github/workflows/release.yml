@@ -1,12 +1,13 @@
 name: Build & Release APK
 
 on:
-  # Push a tag like v1.0.0 to build the APK and publish it as a GitHub Release.
+  # Push a tag like v1.0.0 to build the APK and publish it as a GitHub Release
+  # under that tag.
   push:
     tags:
       - "v*"
-  # Or trigger manually from the Actions tab any time you just want a build
-  # to test, without cutting a release.
+  # Or trigger manually from the Actions tab any time you just want a fresh
+  # build cut as a Release, without pushing a tag yourself.
   workflow_dispatch: {}
 
 permissions:
@@ -34,25 +35,29 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Stage APK
         run: |
           mkdir -p dist
-          name="squish-${GITHUB_REF_NAME:-manual-$GITHUB_RUN_NUMBER}.apk"
+          name="squish-${{ steps.tag.outputs.tag }}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "dist/$name"
           echo "APK_PATH=dist/$name" >> "$GITHUB_ENV"
 
-      # Tag push: publish a GitHub Release with the APK attached.
+      # Always publish a Release with the APK attached — on a real version tag
+      # it's a normal release; on a manual run it's tagged build-<run number>
+      # so repeated manual runs don't collide.
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: ${{ env.APK_PATH }}
           generate_release_notes: true
-
-      # Manual run: just attach the APK to the workflow run, no release cut.
-      - name: Upload build artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: squish-debug-apk
-          path: ${{ env.APK_PATH }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
